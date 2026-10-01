@@ -16,23 +16,25 @@ class Db {
 
   Future<Database> _open() async {
     final path = p.join(await getDatabasesPath(), 'medmate.db');
-    return openDatabase(path, version: 3,
+    return openDatabase(path, version: 4,
         onUpgrade: (d, oldV, newV) async {
-          if (oldV < 2) {
-            await d.execute('ALTER TABLE dose_events ADD COLUMN notified INTEGER DEFAULT 0');
+          // 幂等列修复: 不管从哪个版本升上来, 缺什么补什么
+          // (历史版本建表语句曾缺列且版本号已标高, 只能靠无条件修复)
+          final medCols = (await d.rawQuery('PRAGMA table_info(medications)'))
+              .map((c) => c['name']).toSet();
+          if (!medCols.contains('stock')) {
+            await d.execute(
+                "ALTER TABLE medications ADD COLUMN stock REAL DEFAULT -1");
           }
-          if (oldV < 3) {
-            final cols = await d.rawQuery(
-                "PRAGMA table_info(medications)");
-            final names = cols.map((c) => c['name']).toSet();
-            if (!names.contains('stock')) {
-              await d.execute(
-                  "ALTER TABLE medications ADD COLUMN stock REAL DEFAULT -1");
-            }
-            if (!names.contains('custom_msg')) {
-              await d.execute(
-                  "ALTER TABLE medications ADD COLUMN custom_msg TEXT DEFAULT ''");
-            }
+          if (!medCols.contains('custom_msg')) {
+            await d.execute(
+                "ALTER TABLE medications ADD COLUMN custom_msg TEXT DEFAULT ''");
+          }
+          final doseCols = (await d.rawQuery('PRAGMA table_info(dose_events)'))
+              .map((c) => c['name']).toSet();
+          if (!doseCols.contains('notified')) {
+            await d.execute(
+                'ALTER TABLE dose_events ADD COLUMN notified INTEGER DEFAULT 0');
           }
         },
         onCreate: (d, v) async {
