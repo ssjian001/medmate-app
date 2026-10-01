@@ -207,8 +207,10 @@ class Db {
         "SELECT COUNT(*) c FROM dose_events WHERE status=0 AND plan_time>=?", [from]);
     final skipped = await d.rawQuery(
         "SELECT COUNT(*) c FROM dose_events WHERE status=1 AND plan_time>=?", [from]);
+    final nowHm = DateTime.now().toIso8601String().substring(0, 16).replaceAll('T', ' ');
     final total = await d.rawQuery(
-        "SELECT COUNT(*) c FROM dose_events WHERE plan_time>=? AND status!=2", [from]);
+        "SELECT COUNT(*) c FROM dose_events WHERE plan_time>=? AND (status!=2 OR plan_time < ?)",
+        [from, nowHm]);
     return {
       'taken': taken.first['c'] as int? ?? 0,
       'skipped': skipped.first['c'] as int? ?? 0,
@@ -220,9 +222,10 @@ class Db {
   Future<Map<String, int>> todayProgress() async {
     final d = await db;
     final date = DateTime.now().toIso8601String().substring(0, 10);
+    final nowHm = DateTime.now().toIso8601String().substring(11, 16);
     final rows = await d.query('dose_events',
-        where: "plan_time LIKE ? AND status!=2 AND plan_time <= ?",
-        whereArgs: ['$date%', '${date} ${DateTime.now().toIso8601String().substring(11, 16)}']);
+        where: "plan_time LIKE ? AND (status!=2 OR plan_time < ?) AND plan_time <= ?",
+        whereArgs: ['$date%', '$date $nowHm', '$date $nowHm']);
     return {
       'taken': rows.where((r) => r['status'] == 0).length,
       'total': rows.length,

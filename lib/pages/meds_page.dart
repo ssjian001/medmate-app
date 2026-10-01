@@ -35,7 +35,9 @@ class _MedsPageState extends State<MedsPage> {
     var times = List<String>.from(m?.times ?? const ['08:00']);
     var colorTag = m?.colorTag ?? 'teal';
 
-    final ok = await showDialog<bool>(
+    late final bool ok;
+    try {
+    final r = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
@@ -133,6 +135,12 @@ class _MedsPageState extends State<MedsPage> {
         ),
       ),
     );
+    ok = r ?? false;
+    } finally {
+      for (final c in [name, dosage, note, customMsg, stockCtl]) {
+        c.dispose();
+      }
+    }
     if (ok == true) _reload();
   }
 

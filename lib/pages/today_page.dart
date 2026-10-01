@@ -333,7 +333,16 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
           const SizedBox(height: 10),
           FloatingActionButton.small(
               heroTag: 'export',
-              onPressed: () => Exporter.instance.shareCsv(days: 30),
+              onPressed: () async {
+                try {
+                  await Exporter.instance.shareCsv(days: 30);
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('导出失败: $e'),
+                      backgroundColor: Colors.red));
+                }
+              },
               child: const Icon(Icons.ios_share)),
           const SizedBox(height: 10),
           FloatingActionButton.small(
