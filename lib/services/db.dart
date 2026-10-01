@@ -22,8 +22,17 @@ class Db {
             await d.execute('ALTER TABLE dose_events ADD COLUMN notified INTEGER DEFAULT 0');
           }
           if (oldV < 3) {
-            await d.execute("ALTER TABLE medications ADD COLUMN stock REAL DEFAULT -1");
-            await d.execute("ALTER TABLE medications ADD COLUMN custom_msg TEXT DEFAULT ''");
+            final cols = await d.rawQuery(
+                "PRAGMA table_info(medications)");
+            final names = cols.map((c) => c['name']).toSet();
+            if (!names.contains('stock')) {
+              await d.execute(
+                  "ALTER TABLE medications ADD COLUMN stock REAL DEFAULT -1");
+            }
+            if (!names.contains('custom_msg')) {
+              await d.execute(
+                  "ALTER TABLE medications ADD COLUMN custom_msg TEXT DEFAULT ''");
+            }
           }
         },
         onCreate: (d, v) async {
@@ -35,7 +44,9 @@ class Db {
           times TEXT NOT NULL,
           note TEXT,
           color_tag TEXT,
-          active INTEGER DEFAULT 1)
+          active INTEGER DEFAULT 1,
+          stock REAL DEFAULT -1,
+          custom_msg TEXT DEFAULT '')
       ''');
       await d.execute('''
         CREATE TABLE dose_events(

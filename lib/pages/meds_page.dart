@@ -101,18 +101,32 @@ class _MedsPageState extends State<MedsPage> {
                 child: const Text('取消')),
             FilledButton(
                 onPressed: () async {
-                  if (name.text.trim().isEmpty) return;
-                  await Db.instance.upsertMed(Medication(
-                    id: m?.id,
-                    name: name.text.trim(),
-                    dosage: dosage.text.trim(),
-                    note: note.text.trim().isEmpty ? null : note.text.trim(),
-                    times: times..sort(),
-                    colorTag: colorTag,
-                    stock: stockCtl.text.trim().isEmpty ? -1 : double.tryParse(stockCtl.text.trim()) ?? -1,
-                    customMsg: customMsg.text.trim(),
-                  ));
-                  if (ctx.mounted) Navigator.pop(ctx, true);
+                  if (name.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('请填写药名')));
+                    return;
+                  }
+                  try {
+                    await Db.instance.upsertMed(Medication(
+                      id: m?.id,
+                      name: name.text.trim(),
+                      dosage: dosage.text.trim(),
+                      note: note.text.trim().isEmpty ? null : note.text.trim(),
+                      times: times..sort(),
+                      colorTag: colorTag,
+                      stock: stockCtl.text.trim().isEmpty
+                          ? -1
+                          : double.tryParse(stockCtl.text.trim()) ?? -1,
+                      customMsg: customMsg.text.trim(),
+                    ));
+                    if (ctx.mounted) Navigator.pop(ctx, true);
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text('保存失败: $e'),
+                          backgroundColor: Colors.red));
+                    }
+                  }
                 },
                 child: const Text('保存')),
           ],
