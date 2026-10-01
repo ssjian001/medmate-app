@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/medication.dart';
+import 'scheduler.dart';
 
 class Db {
   Db._();
@@ -16,7 +17,7 @@ class Db {
 
   Future<Database> _open() async {
     final path = p.join(await getDatabasesPath(), 'medmate.db');
-    return openDatabase(path, version: 4,
+    return openDatabase(path, version: 5,
         onUpgrade: (d, oldV, newV) async {
           // 幂等列修复: 不管从哪个版本升上来, 缺什么补什么
           // (历史版本建表语句曾缺列且版本号已标高, 只能靠无条件修复)
@@ -29,6 +30,11 @@ class Db {
           if (!medCols.contains('custom_msg')) {
             await d.execute(
                 "ALTER TABLE medications ADD COLUMN custom_msg TEXT DEFAULT ''");
+          }
+          // 低库存提醒水位 (v5): 空 = 还没提醒过, 库存变化时清空
+          if (!medCols.contains('stock_notified_at')) {
+            await d.execute("ALTER TABLE medications ADD COLUMN "
+                "stock_notified_at TEXT DEFAULT ''");
           }
           final doseCols = (await d.rawQuery('PRAGMA table_info(dose_events)'))
               .map((c) => c['name']).toSet();
@@ -48,7 +54,8 @@ class Db {
           color_tag TEXT,
           active INTEGER DEFAULT 1,
           stock REAL DEFAULT -1,
-          custom_msg TEXT DEFAULT '')
+          custom_msg TEXT DEFAULT '',
+          stock_notified_at TEXT DEFAULT '')
       ''');
       await d.execute('''
         CREATE TABLE dose_events(
@@ -72,13 +79,26 @@ class Db {
 
   Future<int> upsertMed(Medication m) async {
     final d = await db;
-    if (m.id == null) return d.insert('medications', m.toRow());
-    await d.update('medications', m.toRow(), where: 'id=?', whereArgs: [m.id]);
+    if (m.id == null) {
+      final id = await d.insert('medications', m.toRow());
+      await NotificationScheduler.reschedule(id, m);
+      return id;
+    }
+    final row = m.toRow();
+    // 库存变了 (补药/改成不管理) → 清空低库存提醒水位, 否则补货后再也不提醒
+    final old = await d.query('medications', columns: ['stock'],
+        where: 'id=?', whereArgs: [m.id], limit: 1);
+    final prevStock =
+        old.isEmpty ? null : (old.first['stock'] as num?)?.toDouble();
+    if (prevStock != null && prevStock != m.stock) row['stock_notified_at'] = '';
+    await d.update('medications', row, where: 'id=?', whereArgs: [m.id]);
+    await NotificationScheduler.reschedule(m.id!, m);
     return m.id!;
   }
 
   Future<void> deleteMed(int id) async {
     final d = await db;
+    await NotificationScheduler.cancel(id);
     await d.delete('medications', where: 'id=?', whereArgs: [id]);
     await d.delete('dose_events', where: 'medication_id=?', whereArgs: [id]);
   }
@@ -107,13 +127,16 @@ class Db {
   }
 
   /// 漏服检查: 计划时间已过 [graceMin] 分钟且仍 pending 且未提醒过
+  /// 只查当天 (前几天漏掉的别在今天凌晨集中轰炸)
   Future<List<Map<String, dynamic>>> overdue({int graceMin = 30}) async {
     final d = await db;
-    final cutoff = DateTime.now().subtract(Duration(minutes: graceMin))
+    final now = DateTime.now();
+    final today = now.toIso8601String().substring(0, 10);
+    final cutoff = now.subtract(Duration(minutes: graceMin))
         .toIso8601String().substring(0, 16).replaceAll('T', ' ');
     return d.query('dose_events',
-        where: "status=2 AND plan_time < ? AND notified=0",
-        whereArgs: [cutoff],
+        where: "status=2 AND notified=0 AND plan_time LIKE ? AND plan_time < ?",
+        whereArgs: ['$today%', cutoff],
         orderBy: 'plan_time');
   }
 
@@ -124,20 +147,53 @@ class Db {
         where: 'id=?', whereArgs: [eventId]);
   }
 
+  /// 打卡 (taken/skipped): 同一事务内改状态 + 扣库存
+  /// 只在原状态是 pending 时才写 (rawUpdate affected rows == 1), 防重复扣库存
   Future<void> markTaken(int eventId, {bool skipped = false}) async {
     final d = await db;
     final now = DateTime.now().toIso8601String().substring(0, 16);
-    await d.update('dose_events',
-        {'status': skipped ? 1 : 0, 'taken_at': now},
-        where: 'id=?', whereArgs: [eventId]);
+    final newStatus = skipped ? DoseStatus.skipped.index : DoseStatus.taken.index;
+    await d.transaction((txn) async {
+      final rows = await txn.rawQuery(
+          'SELECT medication_id FROM dose_events WHERE id=?', [eventId]);
+      if (rows.isEmpty) return;
+      final medId = rows.first['medication_id'] as int?;
+      final changed = await txn.rawUpdate(
+          'UPDATE dose_events SET status=?, taken_at=? WHERE id=? AND status=?',
+          [newStatus, now, eventId, DoseStatus.pending.index]);
+      if (changed == 0 || skipped || medId == null) return; // 已打过卡 → 不再扣
+      await _deductStock(txn, medId);
+    });
   }
 
-  /// 撤销打卡: 恢复为 pending
+  /// 撤销打卡: 恢复为 pending, 原状态是 taken 时把扣掉的库存还回去
+  /// (skipped 当初没扣库存, 不能凭空加回来)
   Future<void> updateStatus(int eventId, DoseStatus status) async {
     final d = await db;
-    await d.update('dose_events',
-        {'status': status.index, 'taken_at': status == DoseStatus.pending ? null : DateTime.now().toIso8601String().substring(0, 16)},
-        where: 'id=?', whereArgs: [eventId]);
+    final now = DateTime.now().toIso8601String().substring(0, 16);
+    await d.transaction((txn) async {
+      final rows = await txn.rawQuery(
+          'SELECT medication_id, status FROM dose_events WHERE id=?', [eventId]);
+      if (rows.isEmpty) return;
+      final medId = rows.first['medication_id'] as int?;
+      final prev = rows.first['status'] as int?;
+      final changed = await txn.rawUpdate(
+        'UPDATE dose_events SET status=?, taken_at=? WHERE id=?',
+        [status.index, status == DoseStatus.pending ? null : now, eventId],
+      );
+      if (changed == 0 || medId == null) return;
+      if (status == DoseStatus.pending && prev == DoseStatus.taken.index) {
+        await txn.rawUpdate(
+            'UPDATE medications SET stock=stock+1 WHERE id=? AND stock>=0', [medId]);
+      }
+    });
+  }
+
+  /// 扣 1 份库存 (stock>=0 才管理, 事务内调用)
+  Future<void> _deductStock(DatabaseExecutor txn, int medicationId) async {
+    await txn.rawUpdate(
+        'UPDATE medications SET stock=stock-1 WHERE id=? AND stock>=0',
+        [medicationId]);
   }
 
   /// 近 n 天依从率: {taken, total}
@@ -195,6 +251,7 @@ class Db {
   }
 
   /// 库存扣减: 每次打卡服用后 stock-1（stock>=0 才管理）
+  /// 打卡已并入 [markTaken] 的事务, 此方法仅供手动调整等场景
   Future<void> deductStock(int medicationId) async {
     final d = await db;
     await d.rawUpdate(
@@ -203,12 +260,22 @@ class Db {
   }
 
   /// 余量不足的药物 (stock>=0 且 stock <= days*每日次数, 即不足 N 天)
+  /// 水位非空 (已提醒过) 的不再返回, 避免每轮重复通知
   Future<List<Map<String, dynamic>>> lowStock({int days = 3}) async {
     final d = await db;
     return d.rawQuery('''
       SELECT id, name, stock, times FROM medications
       WHERE active=1 AND stock>=0 AND stock <= (LENGTH(times)-LENGTH(REPLACE(times,',',''))+1) * ?
+        AND COALESCE(stock_notified_at,'')=''
     ''', [days]);
+  }
+
+  /// 标记低库存提醒已发 (记水位); 库存变化时由 upsertMed 清空, 补货后可再提醒
+  Future<void> markStockNotified(int medicationId) async {
+    final d = await db;
+    await d.update('medications',
+        {'stock_notified_at': DateTime.now().toIso8601String().substring(0, 16)},
+        where: 'id=?', whereArgs: [medicationId]);
   }
 
   /// 按药物分组的依从统计（近 n 天）

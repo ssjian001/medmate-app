@@ -21,6 +21,7 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
   String _date = _today();
   List<Map<String, dynamic>> _doses = [];
   Map<int, Medication> _meds = {};
+  bool _locked = true; // 未解锁时不渲染任何服药数据
 
   static String _today() {
     final n = DateTime.now();
@@ -45,11 +46,24 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _reload(); // 回前台刷新+查漏服
+    if (state != AppLifecycleState.resumed) return;
+    final today = _today();
+    if (today != _date) {
+      // 跨零点: 回到前台已是新的一天, 换日期重拉当天计划 (不会自动补昨天)
+      setState(() => _date = today);
+    }
+    if (_locked) return; // 锁定状态别偷偷拉数据
+    _reload(); // 回前台刷新+查漏服
   }
 
   Future<void> _bootstrap() async {
-    await AppLock.instance.ensureUnlocked(); // 隐私锁
+    final unlocked = await AppLock.instance.ensureUnlocked(); // 隐私锁
+    if (!mounted) return;
+    if (!unlocked) {
+      setState(() => _locked = true);
+      return; // 认证失败 → 只显示锁定占位页
+    }
+    setState(() => _locked = false);
     // 通知权限引导（Android 13+ 运行时权限）
     final plugin = FlutterLocalNotificationsPlugin();
     final android = plugin.resolvePlatformSpecificImplementation<
