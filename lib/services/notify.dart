@@ -1,6 +1,7 @@
 // 通知服务：到点提醒（flutter_local_notifications + zonedSchedule）
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -11,6 +12,10 @@ class Notify {
   static final Notify instance = Notify._();
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
+
+  /// 系统时区获取失败标记 (true = 提醒按 UTC 排程, 时间可能不准)
+  /// UI 可在启动后读取此字段提示用户
+  bool timezoneWarning = false;
   /// 每药物预留的时间点槽位数 (取消时按此范围全取消)
   static const int slotsPerMed = 20;
   /// 点击通知后的回调 (payload = 计划时间 'yyyy-MM-dd HH:mm')
@@ -27,8 +32,11 @@ class Notify {
       // 不设本地时区的话 zonedSchedule 全按 UTC 算, 国内会差 8 小时
       final info = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(info.identifier));
-    } catch (_) {
+    } catch (e) {
       // 取不到系统时区 (异常/平台不支持) → 保持 timezone 默认值, 不阻断启动
+      // 但 zonedSchedule 会按 UTC 算, 提醒整体偏移 → 记日志+置标记让 UI 提示
+      timezoneWarning = true;
+      debugPrint('[Notify] 获取系统时区失败, 提醒时间可能不准: $e');
     }
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     await _plugin.initialize(

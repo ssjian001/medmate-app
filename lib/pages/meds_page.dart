@@ -120,6 +120,7 @@ class _MedsPageState extends State<MedsPage> {
                           ? -1
                           : double.tryParse(stockCtl.text.trim()) ?? -1,
                       customMsg: customMsg.text.trim(),
+                      active: m?.active ?? true,
                     ));
                     if (ctx.mounted) Navigator.pop(ctx, true);
                   } catch (e) {

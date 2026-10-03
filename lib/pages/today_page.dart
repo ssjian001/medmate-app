@@ -89,6 +89,13 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
         ],
       ));
     }
+    // 时区获取失败 → zonedSchedule 按 UTC 排程, 提醒整体偏移, 必须让用户知情
+    await Notify.instance.init();
+    if (Notify.instance.timezoneWarning && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('时区获取失败，提醒时间可能不准')),
+      );
+    }
     _reload();
   }
 
@@ -136,6 +143,7 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
     for (final m in low) {
       await Notify.instance.now('库存不足',
           '${m['name']} 只剩 ${m['stock']?.toStringAsFixed(0)} 份, 记得补药');
+      await Db.instance.markStockNotified(m['id'] as int);
     }
   }
 

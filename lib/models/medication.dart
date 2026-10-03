@@ -74,11 +74,18 @@ class DoseEvent {
         'taken_at': takenAt ?? '',
       };
 
-  factory DoseEvent.fromRow(Map<String, dynamic> r) => DoseEvent(
-        id: r['id'] as int?,
-        medicationId: r['medication_id'] as int,
-        planTime: r['plan_time'] as String,
-        status: DoseStatus.values[r['status'] as int? ?? 2],
-        takenAt: (r['taken_at'] as String? ?? '').isEmpty ? null : r['taken_at'] as String,
-      );
+  factory DoseEvent.fromRow(Map<String, dynamic> r) {
+    // 历史脏数据可能写出越界 status, 直接索引会 RangeError → 回退 pending
+    final si = r['status'] as int? ?? DoseStatus.pending.index;
+    final status = (si >= 0 && si < DoseStatus.values.length)
+        ? DoseStatus.values[si]
+        : DoseStatus.pending;
+    return DoseEvent(
+      id: r['id'] as int?,
+      medicationId: r['medication_id'] as int,
+      planTime: r['plan_time'] as String,
+      status: status,
+      takenAt: (r['taken_at'] as String? ?? '').isEmpty ? null : r['taken_at'] as String,
+    );
+  }
 }
