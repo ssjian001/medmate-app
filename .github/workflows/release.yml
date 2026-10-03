@@ -8,10 +8,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_USER_HOME: /home/runner/.android
+      ANDROID_SDK_HOME: /home/runner/.android
+      ANDROID_PREFS_ROOT: /home/runner/.android
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -24,12 +28,23 @@ jobs:
 
       - name: Restore signing keystore (与本地构建同源)
         run: |
-          mkdir -p ~/.android
+          mkdir -p ~/.android ~/.config/.android
           echo "${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
+          cp ~/.android/debug.keystore ~/.config/.android/debug.keystore
+          md5sum ~/.android/debug.keystore ~/.config/.android/debug.keystore
 
       - run: flutter pub get
 
       - run: flutter build apk --release
+
+      - name: Verify signature == 本地签名基准
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort | tail -1)
+          GOT=$($APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-release.apk | grep -oE '[0-9a-f]{64}' | head -1)
+          echo "构建签名: $GOT"
+          echo "2c4d6560bf19ab62603849939e2db2a28547819b7af70031dbcc89f545a07a11" > expected.txt
+          grep -q "$GOT" expected.txt || { echo "❌ 签名与本地基准不一致!"; exit 1; }
+          echo "✓ 签名一致"
 
       - name: Stamp signing cert
         run: |
