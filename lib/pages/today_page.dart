@@ -125,12 +125,6 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
   Future<void> _markGroup(List<int> ids, bool skipped) async {
     for (final id in ids) {
       await Db.instance.markTaken(id, skipped: skipped);
-      if (!skipped) {
-        final dose = _doses.firstWhere((x) => x['id'] == id,
-            orElse: () => <String, dynamic>{});
-        final medId = dose['medication_id'] as int?;
-        if (medId != null) await Db.instance.deductStock(medId);
-      }
     }
     await _reload();
     _checkLowStock();
