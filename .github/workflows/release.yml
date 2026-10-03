@@ -8,10 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_USER_HOME: /home/runner/.android
-      ANDROID_SDK_HOME: /home/runner/.android
-      ANDROID_PREFS_ROOT: /home/runner/.android
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +27,7 @@ jobs:
           mkdir -p ~/.android ~/.config/.android
           echo "${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
           cp ~/.android/debug.keystore ~/.config/.android/debug.keystore
-          md5sum ~/.android/debug.keystore ~/.config/.android/debug.keystore
+          echo "keystore restored (default + XDG paths)"
 
       - run: flutter pub get
 
