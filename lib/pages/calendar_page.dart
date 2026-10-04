@@ -37,10 +37,10 @@ class _CalendarPageState extends State<CalendarPage> {
     });
   }
 
-  Color _dayColor(Map<String, int>? h) {
+  Color _dayColor(Map<String, int>? h, bool dark) {
     if (h == null) return Colors.transparent;
     final total = h['total'] ?? 0;
-    if (total == 0) return Colors.grey.shade200;
+    if (total == 0) return dark ? Colors.grey.shade800 : Colors.grey.shade200;
     final rate = (h['taken'] ?? 0) / total;
     if (rate >= 0.999) return Colors.green.shade400;
     if (rate >= 0.5) return Colors.orange.shade300;
@@ -144,7 +144,7 @@ class _CalendarPageState extends State<CalendarPage> {
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 decoration: BoxDecoration(
-                  color: _dayColor(h),
+                  color: _dayColor(h, Theme.of(context).brightness == Brightness.dark),
                   border: Border.all(
                       color: sel ? Colors.blue : isToday ? Colors.teal : Colors.transparent,
                       width: 2),
@@ -164,7 +164,10 @@ class _CalendarPageState extends State<CalendarPage> {
           _legend('全勤', Colors.green.shade400),
           _legend('部分', Colors.orange.shade300),
           _legend('多漏', Colors.red.shade300),
-          _legend('无记录', Colors.grey.shade200),
+          _legend('无记录',
+              Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey.shade800
+                  : Colors.grey.shade200),
         ],),
         const SizedBox(height: 10),
         Expanded(

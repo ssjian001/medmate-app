@@ -256,12 +256,13 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
                     final anySkipped = group.any((d) => d['status'] == 1);
                     final pending = group.where((d) => d['status'] == 2).toList();
                     final pastDue = !allDone && time.compareTo(nowHm) < 0;
+                    final dark = Theme.of(context).brightness == Brightness.dark;
                     return Card(
                       color: allDone
-                          ? Colors.grey.shade100
+                          ? (dark ? Colors.grey.shade900 : Colors.grey.shade100)
                           : _colorOf(_meds[group.first['medication_id'] as int]
                                   ?.colorTag ?? 'teal')
-                              .withValues(alpha: 0.15),
+                              .withValues(alpha: dark ? 0.22 : 0.15),
                       child: Column(children: [
                         ListTile(
                           onTap: () => _showGroupMenu(times[i], group),

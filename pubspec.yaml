@@ -1,7 +1,7 @@
 name: medmate
 description: 服药记录助手 — 本地优先的用药提醒与依从性追踪
 publish_to: 'none'
-version: 1.4.3+10
+version: 1.4.4+11
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
